@@ -201,6 +201,22 @@ void dump_vtk(MeshS *pM, OutputS *pOut)
           }
         }
 
+/* Write acceleration field (triggered by problem_id == Turb */
+        if (strncmp(pM->outfilename,"Turb",4) == 0){
+          fprintf(pfile,"\nVECTORS acceleration float\n");
+          for (k=kl; k<=ku; k++) {
+            for (j=jl; j<=ju; j++) {
+              for (i=il; i<=iu; i++) {
+                data[3*(i-il)  ] = (float)get_usr_expr("DV1")(NULL,i-il,j-jl,k-kl);
+                data[3*(i-il)+1] = (float)get_usr_expr("DV2")(NULL,i-il,j-jl,k-kl);
+                data[3*(i-il)+2] = (float)get_usr_expr("DV3")(NULL,i-il,j-jl,k-kl);
+              }
+              if(!big_end) ath_bswap(data,sizeof(float),3*(iu-il+1));
+              fwrite(data,sizeof(float),(size_t)(3*ndata0),pfile);
+            }
+          }
+        }
+
 /* Write total energy or pressure */
 
 #ifndef BAROTROPIC
