@@ -492,7 +492,12 @@ void data_output(MeshS *pM, const int flag)
  * set dump flag to input argument, check whether time for output */
 
   for (n=0; n<out_count; n++) {
-    dump_flag[n] = flag;
+    /* Don't output on writeall for vtk so that vtk output is purely
+     * time controlled */
+    if (OutArray[n].out_fun == dump_vtk) 
+      dump_flag[n] = 0;
+    else
+      dump_flag[n] = flag;
     if (pM->time >= OutArray[n].t) {
       OutArray[n].t += OutArray[n].dt;
       dump_flag[n] = 1;
