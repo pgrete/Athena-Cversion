@@ -646,17 +646,17 @@ void problem(DomainS *pDomain)
 
 static Real getDVOne(const GridS *pG, const int i, const int j, const int k)
 {
-  return (dv1[k][j][i]); 
+  return (dv1[k+pG->ks][j+pG->js][i+pG->is]);
 }
 
 static Real getDVTwo(const GridS *pG, const int i, const int j, const int k)
 {
-  return (dv2[k][j][i]); 
+  return (dv2[k+pG->ks][j+pG->js][i+pG->is]);
 }
 
 static Real getDVThree(const GridS *pG, const int i, const int j, const int k)
 {
-  return (dv3[k][j][i]); 
+  return (dv3[k+pG->ks][j+pG->js][i+pG->is]);
 }
 
 ConsFun_t get_usr_expr(const char *expr)
