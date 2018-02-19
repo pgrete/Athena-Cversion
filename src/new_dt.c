@@ -45,6 +45,10 @@ void new_dt(MeshS *pM)
   Real di,v1,v2,v3,qsq,asq,cf1sq,cf2sq,cf3sq;
 #ifdef ADIABATIC
   Real p;
+  Real cool_dt = HUGE_NUMBER;
+  /* Allowed fractional change of internal energy.
+   * TODO: make external parameter */
+  Real CoolFrac = 0.1;
 #endif
 #ifdef MHD
   Real b1,b2,b3,bsq,tsum,tdif;
@@ -135,6 +139,13 @@ void new_dt(MeshS *pM)
 
 #endif /* MHD */
 
+#ifdef ADIABATIC
+        if (CoolingFunc != NULL) {
+          cool_dt = MIN(cool_dt,CoolFrac * p / Gamma_1 /
+            (*CoolingFunc)(pGrid->U[k][j][i].d,p,-1.));
+        }
+#endif /* EOS */
+
 /* compute maximum cfl velocity (corresponding to minimum dt) */
         if (pGrid->Nx[0] > 1)
           max_v1 = MAX(max_v1,fabs(v1)+sqrt((double)cf1sq));
@@ -177,7 +188,7 @@ void new_dt(MeshS *pM)
 
   old_dt = pM->dt; 
   pM->dt = CourNo/max_dti;
-    
+
 /* Find minimum timestep over all processors */
 
 #ifdef MPI_PARALLEL
@@ -185,7 +196,20 @@ void new_dt(MeshS *pM)
   ierr = MPI_Allreduce(&my_dt, &dt, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
   pM->dt = dt;
 #endif /* MPI_PARALLEL */
-        
+
+
+#ifdef ADIABATIC
+  long gCool_dt = cool_dt;
+#ifdef MPI_PARALLEL
+  ierr = MPI_Allreduce(&cool_dt, &gCool_dt, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+#endif /* MPI_PARALLEL */
+
+  if (gCool_dt < pM->dt) {
+    ath_perr(0,"time = %e Cooling limited dt by factor of %2g.\n",pM->time,gCool_dt/pM->dt);
+    pM->dt = gCool_dt;
+  }
+#endif /* EOS */
+
 /* Limit increase to 2x old value */
   if (pM->nstep != 0) {
     pM->dt = MIN(pM->dt, 2.0*old_dt);

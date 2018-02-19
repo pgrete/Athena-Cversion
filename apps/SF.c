@@ -585,6 +585,13 @@ static void initialize(GridS *pGrid, DomainS *pD)
    * */
   kpeak = par_getd("problem","CharacteristicWavenumber");
 
+#ifndef ISOTHERMAL
+  if (par_geti_def("problem","Cooling",0) == 1) {
+    CoolingFunc = ParamCool;
+    InitCooling();
+  }
+#endif
+
 
   /* if this is a fresh seed from initial conditions (identified by being < 0) */
   if (rseed < 0) {
