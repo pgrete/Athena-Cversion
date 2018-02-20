@@ -199,13 +199,13 @@ void new_dt(MeshS *pM)
 
 
 #ifdef ADIABATIC
-  long gCool_dt = cool_dt;
+  Real gCool_dt = cool_dt;
 #ifdef MPI_PARALLEL
   ierr = MPI_Allreduce(&cool_dt, &gCool_dt, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
 #endif /* MPI_PARALLEL */
 
   if (gCool_dt < pM->dt) {
-    ath_perr(0,"time = %e Cooling limited dt by factor of %2g.\n",pM->time,gCool_dt/pM->dt);
+    ath_perr(0,"time = %e Cooling limited dt by factor of %.2g.\n",pM->time,gCool_dt/pM->dt);
     pM->dt = gCool_dt;
   }
 #endif /* EOS */
