@@ -921,6 +921,7 @@ static Real hst_MeanMach(const GridS *pG, const int i, const int j, const int k)
     pG->U[k][j][i].B3c*pG->U[k][j][i].B3c); 
 #endif
 
+  eInt = MAX(eInt,TINY_NUMBER);
   Real cs = sqrt(Gamma * Gamma_1 * eInt / pG->U[k][j][i].d);
 
   return sqrt(M2)/pG->U[k][j][i].d/cs;
