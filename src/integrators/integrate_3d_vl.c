@@ -125,6 +125,9 @@ void integrate_3d_vl(DomainS *pD)
 #ifdef H_CORRECTION
   Real cfr,cfl,lambdar,lambdal;
 #endif
+#ifndef BAROTROPIC
+  Real coolf;
+#endif
 #ifdef SHEARING_BOX
   int my_iproc,my_jproc,my_kproc;
   Real M1n, dM2n; /* M1, dM2=(My+d*q*Omega_0*x) at time n */
@@ -803,6 +806,28 @@ void integrate_3d_vl(DomainS *pD)
     }
   }
 #endif /* CYLINDRICAL */
+
+
+/*--- Step 6e -----------------------------------------------------------
+ * Add source terms from optically-thin cooling for 0.5*dt to predict step
+ */
+
+
+#ifndef BAROTROPIC
+  if (CoolingFunc != NULL){
+    for (k=kl; k<=ku; k++) {
+      for (j=jl; j<=ju; j++) {
+        for (i=il; i<=iu; i++) {
+          W = Cons_to_Prim(&(pG->U[k][j][i]));
+          coolf = (*CoolingFunc)(W.d,W.P,(0.5*pG->dt));
+
+          Uhalf[k][j][i].E -= 0.5 * pG->dt * coolf;
+        }
+      }
+    }
+  }
+#endif /* BAROTROPIC */
+
 
 /*=== STEP 7: Compute second-order L/R x1-interface states ===================*/
 
@@ -1657,6 +1682,40 @@ void integrate_3d_vl(DomainS *pD)
     }
   }
 #endif /* CYLINDRICAL */
+
+/*--- Step 12d -----------------------------------------------------------------
+ * Add source terms for optically thin cooling
+ */
+
+#ifndef BAROTROPIC
+  if (CoolingFunc != NULL){
+    long noCool = 0, gNoCool = 0;
+    for (k=ks; k<=ke; k++){
+      for (j=js; j<=je; j++){
+        for (i=is; i<=ie; i++){
+          Whalf = Cons_to_Prim(&Uhalf[k][j][i]);
+          coolf = (*CoolingFunc)(Whalf.d,Whalf.P,pG->dt);
+          if (coolf == 0.)
+            noCool += 1;
+          pG->U[k][j][i].E -= pG->dt*coolf;
+        }
+      }
+    }
+    /* Writing error log here is probably not efficient.
+     * TOOD: move to a better place, e.g., where there's an MPI barrier anyway */
+#ifdef MPI_PARALLEL
+    int mpierr;
+    mpierr = MPI_Reduce(&noCool, &gNoCool, 1, MPI_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (mpierr) ath_error("[integrate_cool]: MPI_Reduce error = %d\n", mpierr);
+#else
+    gNoCool = noCool;
+#endif /* MPI_PARALLEL */
+
+    if (gNoCool != 0)
+      ath_perr(0,"time = %e Cooling hit floor %d times.\n",pG->time,gNoCool);
+
+  }
+#endif /* BAROTROPIC */
 
 /*=== STEP 13: Update cell-centered values for a full timestep ===============*/
 
