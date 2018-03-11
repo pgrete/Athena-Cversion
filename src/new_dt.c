@@ -141,8 +141,10 @@ void new_dt(MeshS *pM)
 
 #ifdef ADIABATIC
         if (CoolingFunc != NULL) {
+          /* using last dt here in order to get an estimate of 
+           * the expected cooling so that the limit works */
           cool_dt = MIN(cool_dt,CoolFrac * p / Gamma_1 /
-            (*CoolingFunc)(pGrid->U[k][j][i].d,p,-1.));
+            (*CoolingFunc)(pGrid->U[k][j][i].d,p,old_dt));
         }
 #endif /* EOS */
 

@@ -105,11 +105,8 @@ Real ParamCool(const Real dens, const Real Press, const Real dt)
   Real eInt = Press / Gamma_1 / dens;
   Real dEdt = CoolPrefac * pow(dens,CoolIdxRho) * pow(eInt,CoolIdxT);
 
-  /* function is called to determine CFL */
-  if (dt < 0.)
-    return dEdt;
-
 /* Expected pressure after update */
+
   Real newPress = Press - dt*Gamma_1*dEdt;
 
   if (newPress < CoolMinPres) {
