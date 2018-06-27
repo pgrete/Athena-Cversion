@@ -547,6 +547,16 @@ static void initialize(GridS *pGrid, DomainS *pD)
   /* This sets c_s = 1 throughout the box. */
   p0 = 1./Gamma;
 #endif /* ISOTHERMAL */
+
+#ifdef VISCOSITY
+  nu_iso = par_getd_def("problem","nu_iso",0.0);
+  nu_aniso = par_getd_def("problem","nu_aniso",0.0);
+#endif
+
+#ifdef THERMAL_CONDUCTION
+  kappa_iso = par_getd_def("problem","kappa_iso",0.0);
+  kappa_aniso = par_getd_def("problem","kappa_aniso",0.0);
+#endif
   
   /* Get input parameters */
 #ifdef MHD
