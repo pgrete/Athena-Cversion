@@ -140,7 +140,7 @@ void integrate_3d_vl(DomainS *pD)
   int ii,ics,ice,jj,jcs,jce,kk,kcs,kce,ips,ipe,jps,jpe,kps,kpe;
 #endif
 #ifdef FIRST_ORDER_FLUX_CORRECTION
-  int flag_cell=0,negd=0,negP=0,superl=0,NaNFlux=0;
+  int flag_cell=0,negd=0,negP=0,entFixD=0,entFixP=0,superl=0,NaNFlux=0;
   Real Vsq;
   Int3Vect BadCell;
 #endif
@@ -169,6 +169,17 @@ void integrate_3d_vl(DomainS *pD)
   for (k=ks-nghost; k<=ke+nghost; k++) {
     for (j=js-nghost; j<=je+nghost; j++) {
       for (i=is-nghost; i<=ie+nghost; i++) {
+#ifdef FIRST_ORDER_FLUX_CORRECTION
+#if (NSCALARS > 0)
+        /*
+         * Using first passive scalar as entropy for flux correction.
+         * TODO: add warnings and more checks during compilation/setup
+         * */
+        W[k][j][i] = Cons_to_Prim(&(pG->U[k][j][i]));
+        pG->U[k][j][i].s[0] = W[k][j][i].P * pow(W[k][j][i].d,1.0-Gamma);
+#endif
+#endif
+
         Uhalf[k][j][i] = pG->U[k][j][i];
 #ifdef MHD
         B1_x1Face[k][j][i] = pG->B1i[k][j][i];
@@ -1846,8 +1857,31 @@ void integrate_3d_vl(DomainS *pD)
         if (flag_cell != 0) {
           FixCell(pG, BadCell);
           W = Cons_to_Prim(&(pG->U[k][j][i]));
+
+          if (W.d <= TINY_NUMBER && W.P <= TINY_NUMBER) {
+            ath_error("This is it. I quit. Density and pressure < 0 after flux correction.\n");
+          }
+
+          if (W.d <= TINY_NUMBER && W.r[0] <= TINY_NUMBER) {
+            ath_error("This is it. I quit. Flux correction failed on density and entropy < 0.\n");
+          }
+
+          if (W.P <= TINY_NUMBER && W.r[0] <= TINY_NUMBER) {
+            ath_error("This is it. I quit. Flux correction failed on pressure and entropy < 0.\n");
+          }
+
           if (W.P <= TINY_NUMBER) {
-            ath_error("flux correction failed on pressure.\n");
+            W.P = W.r[0] * pow(W.d,Gamma);
+            entFixP++;
+          }
+
+          if (W.d <= TINY_NUMBER) {
+            W.d = pow(W.P / W.r[0],1./Gamma);
+            entFixD++;
+          }
+
+          pG->U[k][j][i] = Prim_to_Cons(&W);
+
           }
           flag_cell=0;
         }
@@ -1855,8 +1889,8 @@ void integrate_3d_vl(DomainS *pD)
     }
   }
 
-  if (negd > 0 || negP > 0)
-    printf("[Step14]: at t=%g; %i cells had d<0; %i cells had P<0\n",pG->time,negd,negP);
+  if (negd > 0 || negP > 0 || entFixD > 0 || entFixP > 0)
+    printf("[Step14]: at t=%g; %i cells had d<0; %i cells had P<0; %i cells had d fixed via entropy; %i cells had P fixed via entropy\n",pG->time,negd,negP,entFixD,entFixP);
 #endif /* FIRST_ORDER_FLUX_CORRECTION */
 
 #ifdef STATIC_MESH_REFINEMENT
