@@ -175,8 +175,8 @@ void integrate_3d_vl(DomainS *pD)
          * Using first passive scalar as entropy for flux correction.
          * TODO: add warnings and more checks during compilation/setup
          * */
-        W[k][j][i] = Cons_to_Prim(&(pG->U[k][j][i]));
-        pG->U[k][j][i].s[0] = W[k][j][i].P * pow(W[k][j][i].d,1.0-Gamma);
+        W = Cons_to_Prim(&(pG->U[k][j][i]));
+        pG->U[k][j][i].s[0] = W.P * pow(W.d,1.0-Gamma);
 #endif
 #endif
 
@@ -1882,7 +1882,6 @@ void integrate_3d_vl(DomainS *pD)
 
           pG->U[k][j][i] = Prim_to_Cons(&W);
 
-          }
           flag_cell=0;
         }
       }
