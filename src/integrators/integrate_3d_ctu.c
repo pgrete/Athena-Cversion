@@ -47,6 +47,15 @@
 #include "../particles/particle.h"
 #endif
 
+#ifdef MPI_PARALLEL
+#include "mpi.h"
+#ifdef DOUBLE_PREC
+#define MPI_RL MPI_DOUBLE
+#else /* DOUBLE_PREC */
+#define MPI_RL MPI_FLOAT
+#endif /* DOUBLE_PREC */
+#endif /* MPI_PARALLEL */
+
 #if defined(CTU_INTEGRATOR)
 #ifdef SPECIAL_RELATIVITY
 #error : The CTU integrator cannot be used for special relativity.
@@ -3167,14 +3176,30 @@ void integrate_3d_ctu(DomainS *pD)
 
 #ifndef BAROTROPIC
   if (CoolingFunc != NULL){
+    long noCool = 0, gNoCool = 0;
     for (k=ks; k<=ke; k++){
       for (j=js; j<=je; j++){
         for (i=is; i<=ie; i++){
           coolf = (*CoolingFunc)(dhalf[k][j][i],phalf[k][j][i],pG->dt);
+          if (coolf == 0.)
+            noCool += 1;
           pG->U[k][j][i].E -= pG->dt*coolf;
         }
       }
     }
+    /* Writing error log here is probably not efficient.
+     * TOOD: move to a better place, e.g., where there's an MPI barrier anyway */
+#ifdef MPI_PARALLEL
+    int mpierr;
+    mpierr = MPI_Reduce(&noCool, &gNoCool, 1, MPI_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (mpierr) ath_error("[integrate_cool]: MPI_Reduce error = %d\n", mpierr);
+#else
+    gNoCool = noCool;
+#endif /* MPI_PARALLEL */
+
+    if (gNoCool != 0)
+      ath_perr(0,"time = %e Cooling hit floor %d times.\n",pG->time,gNoCool);
+
   }
 #endif /* BAROTROPIC */
 

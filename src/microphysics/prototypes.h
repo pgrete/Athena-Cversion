@@ -21,6 +21,8 @@ void conduction_destruct(void);
 
 /* cool.c */
 Real KoyInut(const Real dens, const Real Press, const Real dt);
+void InitCooling();
+Real ParamCool(const Real dens, const Real Press, const Real dt);
 
 /* get_eta.c */
 #ifdef RESISTIVITY

@@ -23,6 +23,7 @@
  * - KoyInut() - Koyama & Inutsuka cooling function */
 /*============================================================================*/
 
+#include <stdio.h>
 #include <math.h>
 #include <float.h>
 #include "../defs.h"
@@ -36,6 +37,15 @@ static const Real mbar = (1.37)*(1.6733e-24);
 static const Real kb = 1.380658e-16;
 static const Real HeatRate = 2.0e-26;
 static const Real Tmin = 10;
+
+/* Minimum pressure in parameter cooling function */
+static Real CoolMinPres;
+/* Power index of density in parameter cooling function */
+static Real CoolIdxRho;
+/* Power index of temperature/internal energy in parameter cooling function */
+static Real CoolIdxT;
+/* Prefactor in parameter cooling function */
+static Real CoolPrefac;
 
 /*=========================== PUBLIC FUNCTIONS ===============================*/
 /*----------------------------------------------------------------------------*/
@@ -77,5 +87,34 @@ Real KoyInut(const Real dens, const Real Press, const Real dt)
   MaxdT = kb*(T-Teq)/(dt*Gamma_1);
   coolrate = MIN(coolratepp,MaxdT);
   return n*coolrate;
+}
+
+void InitCooling() {
+  CoolIdxRho = par_getd("problem","CoolIdxRho");
+  CoolIdxT = par_getd("problem","CoolIdxT");
+  CoolPrefac = par_getd("problem","CoolPrefac");
+  CoolMinPres = par_getd("problem","CoolMinPres");
+}
+
+Real ParamCool(const Real dens, const Real Press, const Real dt)
+{
+  if (Press < CoolMinPres) {
+    return(0.);
+  }
+
+  Real eInt = Press / Gamma_1 / dens;
+  Real dEdt = CoolPrefac * pow(dens,CoolIdxRho) * pow(eInt,CoolIdxT);
+
+/* Expected pressure after update */
+
+  Real newPress = Press - dt*Gamma_1*dEdt;
+
+  if (newPress < CoolMinPres) {
+    printf("Limiting cooling to %.3g (from %.3g).\n",
+      (Press - CoolMinPres)/(dt*Gamma_1),dEdt);
+    dEdt = (Press - CoolMinPres)/(dt*Gamma_1);
+  }
+
+  return dEdt;
 }
 #endif /* BAROTROPIC */
