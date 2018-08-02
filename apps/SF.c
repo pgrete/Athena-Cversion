@@ -544,8 +544,12 @@ static void initialize(GridS *pGrid, DomainS *pD)
   nx3gh = nx3 + 2*nghost;
 
 #ifndef ISOTHERMAL
+
+  p0 = par_getd_def("problem","p0",-1.0);
+
   /* This sets c_s = 1 throughout the box. */
-  p0 = 1./Gamma;
+  if (p0 == -1.0)
+    p0 = 1./Gamma;
 #endif /* ISOTHERMAL */
 
 #ifdef VISCOSITY
