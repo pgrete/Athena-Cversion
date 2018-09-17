@@ -166,6 +166,8 @@ static int P3Dng[3];
 static int P3DCst[3],P3DCse[3],P3DCsz[3];
 /* Starting and ending indices for global grid */
 static int gis,gie,gjs,gje,gks,gke;
+/* local coordinates */
+Real x1,x2,x3;
 /* Seed for random number generator */
 long int rseed = -1;
 static  double globalAmplNorm[1];
@@ -173,6 +175,11 @@ static  double globalAmplNorm[1];
 /* beta = isothermal pressure / magnetic pressure
  * B0 = sqrt(2.0*Iso_csound2*rhobar/beta) is init magnetic field strength */
 static Real beta,B0;
+/* magnetic field configuration
+ * 0 - uniform in one direction
+ * 1 - no net flux, with uniform in opposite directions
+ */
+static int BFieldConfig;
 #endif /* MHD */
 /* Initial density (will be average density throughout simulation) */
 static const Real rhobar = 1.0;
@@ -566,6 +573,8 @@ static void initialize(GridS *pGrid, DomainS *pD)
 #ifdef MHD
   /* magnetic field strength */
   beta = par_getd("problem","beta");
+  
+  BFieldConfig = par_geti_def("problem","BFieldConfig",0);
 
 #ifdef ISOTHERMAL
   /* beta = isothermal pressure/magnetic pressure */
@@ -749,18 +758,38 @@ void problem(DomainS *pDomain)
   }
 
 #ifdef MHD
+  Real localB0;
+  Real x2center = 0.5*(pDomain->RootMaxX[1] - pDomain->RootMinX[1]);
+  
   /* Initialize uniform magnetic field */
   for (k=ks-nghost; k<=ke+nghost; k++) {
     for (j=js-nghost; j<=je+nghost; j++) {
       for (i=is-nghost; i<=ie+nghost; i++) {
-        pGrid->U[k][j][i].B1c  = B0;
+        cc_pos(pGrid,i,j,k,&x1,&x2,&x3);
+
+        // uniform in one direction
+        if (BFieldConfig == 0) {
+          localB0 = B0;
+        
+        // uniform no net flux
+        } else if (BFieldConfig == 1) {
+          if (x2 < x2center)
+            localB0 = B0;
+          else
+            localB0 = -B0;
+
+        } else {
+          ath_error("Error: unknown magnetic field configuration!");
+        }
+
+        pGrid->U[k][j][i].B1c  = localB0;
         pGrid->U[k][j][i].B2c  = 0.0;
         pGrid->U[k][j][i].B3c  = 0.0;
-        pGrid->B1i[k][j][i] = B0;
+        pGrid->B1i[k][j][i] = localB0;
         pGrid->B2i[k][j][i] = 0.0;
         pGrid->B3i[k][j][i] = 0.0;
 #ifndef ISOTHERMAL
-        pGrid->U[k][j][i].E += 0.5 * B0 * B0;
+        pGrid->U[k][j][i].E += 0.5 * localB0 * localB0;
 #endif
       }
     }
