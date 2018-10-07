@@ -211,6 +211,8 @@ static Real hst_dEk(const GridS *pG, const int i, const int j, const int k);
 static Real hst_dEb(const GridS *pG, const int i, const int j, const int k);
 static Real hst_MeanMach(const GridS *pG, const int i, const int j, const int k);
 static Real hst_MeanAlfvenicMach(const GridS *pG, const int i, const int j, const int k);
+static Real hst_MeanPressure(const GridS *pG, const int i, const int j, const int k);
+static Real hst_MeanPlasmaBeta(const GridS *pG, const int i, const int j, const int k);
 
 /* Function prototypes for Numerical Recipes functions */
 static double ran2(long int *idum);
@@ -721,6 +723,8 @@ static void initialize(GridS *pGrid, DomainS *pD)
   dump_history_enroll(hst_dEb,"<dE_B>");
   dump_history_enroll(hst_MeanMach,"<SonicMach>");
   dump_history_enroll(hst_MeanAlfvenicMach,"<AlfvenicMach>");
+  dump_history_enroll(hst_MeanPressure,"<Pressure>");
+  dump_history_enroll(hst_MeanPlasmaBeta,"<PlasmaBeta>");
 
   return;
 }
@@ -941,6 +945,62 @@ static Real hst_dEk(const GridS *pG, const int i, const int j, const int k)
   return 0.5*(pG->U[k][j][i].M1*pG->U[k][j][i].M1 +
 	      pG->U[k][j][i].M2*pG->U[k][j][i].M2 +
 	      pG->U[k][j][i].M3*pG->U[k][j][i].M3)/pG->U[k][j][i].d;
+}
+
+static Real hst_MeanPlasmaBeta(const GridS *pG, const int i, const int j, const int k)
+{ /* plasma beta p_th/p_B */
+#ifdef MHD
+
+  Real B2 = ( 
+    pG->U[k][j][i].B1c*pG->U[k][j][i].B1c + 
+    pG->U[k][j][i].B2c*pG->U[k][j][i].B2c + 
+    pG->U[k][j][i].B3c*pG->U[k][j][i].B3c); 
+
+#ifdef ISOTHERMAL
+  Real Pres =  Iso_csound2 * pG->U[k][j][i].d;
+#else
+
+  Real M2 = (
+    pG->U[k][j][i].M1*pG->U[k][j][i].M1 +
+    pG->U[k][j][i].M2*pG->U[k][j][i].M2 +
+    pG->U[k][j][i].M3*pG->U[k][j][i].M3);
+
+  Real eInt = pG->U[k][j][i].E - 0.5 * M2 / pG->U[k][j][i].d - 0.5 * B2;
+  eInt = MAX(eInt,TINY_NUMBER);
+  Real Pres =  Gamma_1 * eInt;
+
+#endif /* ISOTHERMAL */
+
+  return Pres/(0.5 * B2);
+
+#else
+  return 0.0;
+#endif /* MHD */
+}
+
+static Real hst_MeanPressure(const GridS *pG, const int i, const int j, const int k)
+{ /* pressure*/
+#ifdef ISOTHERMAL
+  return Iso_csound2 * pG->U[k][j][i].d;
+#else
+
+  Real M2 = (
+    pG->U[k][j][i].M1*pG->U[k][j][i].M1 +
+    pG->U[k][j][i].M2*pG->U[k][j][i].M2 +
+    pG->U[k][j][i].M3*pG->U[k][j][i].M3);
+
+  Real eInt = pG->U[k][j][i].E - 0.5 * M2 / pG->U[k][j][i].d;
+#ifdef MHD
+  eInt -= 0.5 * (
+    pG->U[k][j][i].B1c*pG->U[k][j][i].B1c + 
+    pG->U[k][j][i].B2c*pG->U[k][j][i].B2c + 
+    pG->U[k][j][i].B3c*pG->U[k][j][i].B3c); 
+#endif
+
+  eInt = MAX(eInt,TINY_NUMBER);
+  return Gamma_1 * eInt;
+
+#endif /* ISOTHERMAL */
 }
 
 static Real hst_MeanMach(const GridS *pG, const int i, const int j, const int k)
