@@ -574,16 +574,22 @@ static void initialize(GridS *pGrid, DomainS *pD)
   /* Get input parameters */
 #ifdef MHD
   /* magnetic field strength */
-  beta = par_getd("problem","beta");
+  beta = par_getd_def("problem","beta",-1.0);
+  B0 = par_getd_def("problem","B0",0.0);
+
+  if ((beta == -1.0) && (B0 == 0.0)) 
+      ath_error("Please initialize beta or B0 for an MHD problem!\n");
   
   BFieldConfig = par_geti_def("problem","BFieldConfig",0);
 
+  if (B0 == 0.0) {
 #ifdef ISOTHERMAL
   /* beta = isothermal pressure/magnetic pressure */
-  B0 = sqrt(2.0*Iso_csound2*rhobar/beta);
+    B0 = sqrt(2.0*Iso_csound2*rhobar/beta);
 #else
-  B0 = sqrt(2.0 * p0/beta);
+    B0 = sqrt(2.0 * p0/beta);
 #endif /* ISOTHERMAL */
+  }
 #endif /* MHD */
   
   /* determines weight of solenoidal relative to dilatational components */
