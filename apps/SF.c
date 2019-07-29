@@ -237,8 +237,8 @@ static void inject(Complex *ampl)
    */
   Real tmp;
 
-  klow = 0.;
-  khigh = 2. * kpeak; 
+  //klow = 0.;
+  //khigh = 2. * kpeak; 
 
   int x,y,z,kx,ky,kz;
   Real q3;
@@ -615,6 +615,8 @@ static void initialize(GridS *pGrid, DomainS *pD)
    * char. wavenumber where the forcing peaks 
    * */
   kpeak = par_getd("problem","CharacteristicWavenumber");
+  klow =  par_getd("problem","klow");
+  khigh = par_getd("problem","khigh");
 
 #ifndef ISOTHERMAL
   if (par_geti_def("problem","Cooling",0) == 1) {
