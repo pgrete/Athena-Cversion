@@ -117,6 +117,8 @@ static void initialize(GridS *pGrid, DomainS *pD);
 /* Function prototypes for analysis and outputs */
 static Real hst_dEk(const GridS *pG, const int i, const int j, const int k);
 static Real hst_dEb(const GridS *pG, const int i, const int j, const int k);
+static Real hst_MeanMach(const GridS *pG, const int i, const int j, const int k);
+static Real hst_MeanAlfvenicMach(const GridS *pG, const int i, const int j, const int k);
 
 /* Function prototypes for Numerical Recipes functions */
 static double ran2(long int *idum);
@@ -571,6 +573,9 @@ static void initialize(GridS *pGrid, DomainS *pD)
   /* Enroll outputs */
   dump_history_enroll(hst_dEk,"<dE_K>");
   dump_history_enroll(hst_dEb,"<dE_B>");
+  dump_history_enroll(hst_MeanMach,"<SonicMach>");
+  dump_history_enroll(hst_MeanAlfvenicMach,"<AlfvenicMach>");
+
 
   return;
 }
@@ -826,6 +831,27 @@ static Real hst_dEk(const GridS *pG, const int i, const int j, const int k)
   return 0.5*(pG->U[k][j][i].M1*pG->U[k][j][i].M1 +
 	      pG->U[k][j][i].M2*pG->U[k][j][i].M2 +
 	      pG->U[k][j][i].M3*pG->U[k][j][i].M3)/pG->U[k][j][i].d;
+}
+
+static Real hst_MeanMach(const GridS *pG, const int i, const int j, const int k)
+{ /* Sonic Mach number*/
+  return sqrt((pG->U[k][j][i].M1*pG->U[k][j][i].M1 +
+	      pG->U[k][j][i].M2*pG->U[k][j][i].M2 +
+	      pG->U[k][j][i].M3*pG->U[k][j][i].M3)/Iso_csound2)/pG->U[k][j][i].d;
+}
+
+static Real hst_MeanAlfvenicMach(const GridS *pG, const int i, const int j, const int k)
+{ /* Alfvenic Mach number */
+#ifdef MHD
+  return sqrt((pG->U[k][j][i].M1*pG->U[k][j][i].M1 +
+	      pG->U[k][j][i].M2*pG->U[k][j][i].M2 +
+	      pG->U[k][j][i].M3*pG->U[k][j][i].M3)/pG->U[k][j][i].d/(
+        pG->U[k][j][i].B1c*pG->U[k][j][i].B1c +
+        pG->U[k][j][i].B2c*pG->U[k][j][i].B2c +
+        pG->U[k][j][i].B3c*pG->U[k][j][i].B3c));
+#else /* MHD */
+  return 0.0;
+#endif /* MHD */
 }
 
 /*! \fn static Real hst_dEb(const Grid *pG, const int i,const int j,const int k)

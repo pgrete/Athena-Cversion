@@ -125,6 +125,9 @@ void integrate_3d_vl(DomainS *pD)
 #ifdef H_CORRECTION
   Real cfr,cfl,lambdar,lambdal;
 #endif
+#ifndef BAROTROPIC
+  Real coolf;
+#endif
 #ifdef SHEARING_BOX
   int my_iproc,my_jproc,my_kproc;
   Real M1n, dM2n; /* M1, dM2=(My+d*q*Omega_0*x) at time n */
@@ -137,7 +140,7 @@ void integrate_3d_vl(DomainS *pD)
   int ii,ics,ice,jj,jcs,jce,kk,kcs,kce,ips,ipe,jps,jpe,kps,kpe;
 #endif
 #ifdef FIRST_ORDER_FLUX_CORRECTION
-  int flag_cell=0,negd=0,negP=0,superl=0,NaNFlux=0;
+  int flag_cell=0,negd=0,negP=0,entFixD=0,entFixP=0,superl=0,NaNFlux=0;
   Real Vsq;
   Int3Vect BadCell;
 #endif
@@ -166,6 +169,17 @@ void integrate_3d_vl(DomainS *pD)
   for (k=ks-nghost; k<=ke+nghost; k++) {
     for (j=js-nghost; j<=je+nghost; j++) {
       for (i=is-nghost; i<=ie+nghost; i++) {
+#ifdef FIRST_ORDER_FLUX_CORRECTION
+#if (NSCALARS > 0)
+        /*
+         * Using first passive scalar as entropy for flux correction.
+         * TODO: add warnings and more checks during compilation/setup
+         * */
+        W = Cons_to_Prim(&(pG->U[k][j][i]));
+        pG->U[k][j][i].s[0] = W.P * pow(W.d,1.0-Gamma);
+#endif
+#endif
+
         Uhalf[k][j][i] = pG->U[k][j][i];
 #ifdef MHD
         B1_x1Face[k][j][i] = pG->B1i[k][j][i];
@@ -803,6 +817,36 @@ void integrate_3d_vl(DomainS *pD)
     }
   }
 #endif /* CYLINDRICAL */
+
+
+/*--- Step 6e -----------------------------------------------------------
+ * Add source terms from optically-thin cooling for 0.5*dt to predict step
+ */
+
+
+#ifndef BAROTROPIC
+  Real CoolMinPres = 0.0001;
+  if (CoolingFunc != NULL){
+    for (k=kl; k<=ku; k++) {
+      for (j=jl; j<=ju; j++) {
+        for (i=il; i<=iu; i++) {
+          W = Cons_to_Prim(&pG->U[k][j][i]);
+          Whalf = Cons_to_Prim(&Uhalf[k][j][i]);
+
+          if (Whalf.P < CoolMinPres)
+            continue;
+
+          coolf = (*CoolingFunc)(W.d,W.P,(0.5*pG->dt));
+
+          if (Whalf.P - 0.5*pG->dt*Gamma_1*coolf < CoolMinPres)
+            coolf = (Whalf.P - CoolMinPres)/(pG->dt*Gamma_1);
+          Uhalf[k][j][i].E -= 0.5 * pG->dt * coolf;
+        }
+      }
+    }
+  }
+#endif /* BAROTROPIC */
+
 
 /*=== STEP 7: Compute second-order L/R x1-interface states ===================*/
 
@@ -1658,6 +1702,7 @@ void integrate_3d_vl(DomainS *pD)
   }
 #endif /* CYLINDRICAL */
 
+
 /*=== STEP 13: Update cell-centered values for a full timestep ===============*/
 
 /*--- Step 13a -----------------------------------------------------------------
@@ -1735,6 +1780,54 @@ void integrate_3d_vl(DomainS *pD)
     }
   }
 
+/*--- Step 13.5 -----------------------------------------------------------------
+ * Add source terms for optically thin cooling
+ */
+
+#ifndef BAROTROPIC
+  if (CoolingFunc != NULL){
+    long noCool = 0, gNoCool = 0;
+    for (k=ks; k<=ke; k++){
+      for (j=js; j<=je; j++){
+        for (i=is; i<=ie; i++){
+          W = Cons_to_Prim(&pG->U[k][j][i]);
+          if (W.P < CoolMinPres) {
+            noCool += 1;
+            continue;
+          }
+          Whalf = Cons_to_Prim(&Uhalf[k][j][i]);
+          coolf = (*CoolingFunc)(Whalf.d,Whalf.P,pG->dt);
+          if (coolf == 0.) {
+            noCool += 1;
+            continue;
+          }
+
+          /* U is already updated with fluxes */
+          if (W.P - pG->dt*Gamma_1*coolf < CoolMinPres) {
+            printf("Limiting cooling to %.3g (from %.3g).\n",
+              (W.P - CoolMinPres)/(pG->dt*Gamma_1),coolf);
+            coolf = (W.P - CoolMinPres)/(pG->dt*Gamma_1);
+          }
+          pG->U[k][j][i].E -= pG->dt*coolf;
+        }
+      }
+    }
+    /* Writing error log here is probably not efficient.
+     * TOOD: move to a better place, e.g., where there's an MPI barrier anyway */
+#ifdef MPI_PARALLEL
+    int mpierr;
+    mpierr = MPI_Reduce(&noCool, &gNoCool, 1, MPI_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+    if (mpierr) ath_error("[integrate_cool]: MPI_Reduce error = %d\n", mpierr);
+#else
+    gNoCool = noCool;
+#endif /* MPI_PARALLEL */
+
+    if (gNoCool != 0)
+      ath_perr(0,"time = %e Cooling hit floor %d times.\n",pG->time,gNoCool);
+
+  }
+#endif /* BAROTROPIC */
+
 #ifdef FIRST_ORDER_FLUX_CORRECTION
 /*=== STEP 14: First-order flux correction ===================================*/
 
@@ -1753,7 +1846,7 @@ void integrate_3d_vl(DomainS *pD)
           negd++;
         }
 #ifndef ISOTHERMAL
-        if (W.P < 0.0) {
+        if (W.P <= TINY_NUMBER) {
           flag_cell = 1;
           BadCell.i = i;
           BadCell.j = j;
@@ -1763,14 +1856,40 @@ void integrate_3d_vl(DomainS *pD)
 #endif
         if (flag_cell != 0) {
           FixCell(pG, BadCell);
+          W = Cons_to_Prim(&(pG->U[k][j][i]));
+
+          if (W.d <= TINY_NUMBER && W.P <= TINY_NUMBER) {
+            ath_error("This is it. I quit. Density and pressure < 0 after flux correction.\n");
+          }
+
+          if (W.d <= TINY_NUMBER && W.r[0] <= TINY_NUMBER) {
+            ath_error("This is it. I quit. Flux correction failed on density and entropy < 0.\n");
+          }
+
+          if (W.P <= TINY_NUMBER && W.r[0] <= TINY_NUMBER) {
+            ath_error("This is it. I quit. Flux correction failed on pressure and entropy < 0.\n");
+          }
+
+          if (W.P <= TINY_NUMBER) {
+            W.P = W.r[0] * pow(W.d,Gamma);
+            entFixP++;
+          }
+
+          if (W.d <= TINY_NUMBER) {
+            W.d = pow(W.P / W.r[0],1./Gamma);
+            entFixD++;
+          }
+
+          pG->U[k][j][i] = Prim_to_Cons(&W);
+
           flag_cell=0;
         }
       }
     }
   }
 
-  if (negd > 0 || negP > 0)
-    printf("[Step14]: at t=%g; %i cells had d<0; %i cells had P<0\n",pG->time,negd,negP);
+  if (negd > 0 || negP > 0 || entFixD > 0 || entFixP > 0)
+    printf("[Step14]: at t=%g; %i cells had d<0; %i cells had P<0; %i cells had d fixed via entropy; %i cells had P fixed via entropy\n",pG->time,negd,negP,entFixD,entFixP);
 #endif /* FIRST_ORDER_FLUX_CORRECTION */
 
 #ifdef STATIC_MESH_REFINEMENT

@@ -50,10 +50,6 @@
 #include "globals.h"
 #include "p3dfft.h"
 
-#ifndef ISOTHERMAL
-#error Problem generator only works for isothermal turbulence
-#endif /* ISOTHERMAL */
-
 #ifdef MPI_PARALLEL
 #include "mpi.h"
 #ifdef DOUBLE_PREC
@@ -170,6 +166,8 @@ static int P3Dng[3];
 static int P3DCst[3],P3DCse[3],P3DCsz[3];
 /* Starting and ending indices for global grid */
 static int gis,gie,gjs,gje,gks,gke;
+/* local coordinates */
+Real x1,x2,x3;
 /* Seed for random number generator */
 long int rseed = -1;
 static  double globalAmplNorm[1];
@@ -177,9 +175,17 @@ static  double globalAmplNorm[1];
 /* beta = isothermal pressure / magnetic pressure
  * B0 = sqrt(2.0*Iso_csound2*rhobar/beta) is init magnetic field strength */
 static Real beta,B0;
+/* magnetic field configuration
+ * 0 - uniform in one direction
+ * 1 - no net flux, with uniform in opposite directions
+ */
+static int BFieldConfig;
 #endif /* MHD */
 /* Initial density (will be average density throughout simulation) */
 static const Real rhobar = 1.0;
+
+/* Initial pressure. */
+static Real p0;
 
 /* Functions appear in this file in the same order that they appear in the
  * prototypes below */
@@ -204,6 +210,9 @@ static void initialize(GridS *pGrid, DomainS *pD);
 static Real hst_dEk(const GridS *pG, const int i, const int j, const int k);
 static Real hst_dEb(const GridS *pG, const int i, const int j, const int k);
 static Real hst_MeanMach(const GridS *pG, const int i, const int j, const int k);
+static Real hst_MeanAlfvenicMach(const GridS *pG, const int i, const int j, const int k);
+static Real hst_MeanPressure(const GridS *pG, const int i, const int j, const int k);
+static Real hst_MeanPlasmaBeta(const GridS *pG, const int i, const int j, const int k);
 
 /* Function prototypes for Numerical Recipes functions */
 static double ran2(long int *idum);
@@ -228,8 +237,8 @@ static void inject(Complex *ampl)
    */
   Real tmp;
 
-  klow = 0.;
-  khigh = 2. * kpeak; 
+  //klow = 0.;
+  //khigh = 2. * kpeak; 
 
   int x,y,z,kx,ky,kz;
   Real q3;
@@ -487,6 +496,14 @@ static void perturb(GridS *pGrid, Real dt)
         pGrid->U[k][j][i].M1 += qa*dv1[ind];
         pGrid->U[k][j][i].M2 += qa*dv2[ind];
         pGrid->U[k][j][i].M3 += qa*dv3[ind];
+#ifndef ISOTHERMAL
+        pGrid->U[k][j][i].E += (
+          pGrid->U[k][j][i].M1 * dt * globalAmplNorm[0] * dv1[ind] +
+          pGrid->U[k][j][i].M2 * dt * globalAmplNorm[0] * dv2[ind] +
+          pGrid->U[k][j][i].M3 * dt * globalAmplNorm[0] * dv3[ind] + (
+          dv1[ind] * dv1[ind] + dv2[ind] * dv2[ind] + dv3[ind] * dv3[ind]
+          ) * qa * qa /(2.* pGrid->U[k][j][i].d));
+#endif /* ISOTHERMAL */
       }
     }
   }
@@ -534,13 +551,45 @@ static void initialize(GridS *pGrid, DomainS *pD)
   nx1gh = nx1 + 2*nghost;
   nx2gh = nx2 + 2*nghost;
   nx3gh = nx3 + 2*nghost;
+
+#ifndef ISOTHERMAL
+
+  p0 = par_getd_def("problem","p0",-1.0);
+
+  /* This sets c_s = 1 throughout the box. */
+  if (p0 == -1.0)
+    p0 = 1./Gamma;
+#endif /* ISOTHERMAL */
+
+#ifdef VISCOSITY
+  nu_iso = par_getd_def("problem","nu_iso",0.0);
+  nu_aniso = par_getd_def("problem","nu_aniso",0.0);
+#endif
+
+#ifdef THERMAL_CONDUCTION
+  kappa_iso = par_getd_def("problem","kappa_iso",0.0);
+  kappa_aniso = par_getd_def("problem","kappa_aniso",0.0);
+#endif
   
   /* Get input parameters */
 #ifdef MHD
   /* magnetic field strength */
-  beta = par_getd("problem","beta");
+  beta = par_getd_def("problem","beta",-1.0);
+  B0 = par_getd_def("problem","B0",0.0);
+
+  if ((beta == -1.0) && (B0 == 0.0)) 
+      ath_error("Please initialize beta or B0 for an MHD problem!\n");
+  
+  BFieldConfig = par_geti_def("problem","BFieldConfig",0);
+
+  if (B0 == 0.0) {
+#ifdef ISOTHERMAL
   /* beta = isothermal pressure/magnetic pressure */
-  B0 = sqrt(2.0*Iso_csound2*rhobar/beta);
+    B0 = sqrt(2.0*Iso_csound2*rhobar/beta);
+#else
+    B0 = sqrt(2.0 * p0/beta);
+#endif /* ISOTHERMAL */
+  }
 #endif /* MHD */
   
   /* determines weight of solenoidal relative to dilatational components */
@@ -566,6 +615,15 @@ static void initialize(GridS *pGrid, DomainS *pD)
    * char. wavenumber where the forcing peaks 
    * */
   kpeak = par_getd("problem","CharacteristicWavenumber");
+  klow =  par_getd("problem","klow");
+  khigh = par_getd("problem","khigh");
+
+#ifndef ISOTHERMAL
+  if (par_geti_def("problem","Cooling",0) == 1) {
+    CoolingFunc = ParamCool;
+    InitCooling();
+  }
+#endif
 
 
   /* if this is a fresh seed from initial conditions (identified by being < 0) */
@@ -672,6 +730,9 @@ static void initialize(GridS *pGrid, DomainS *pD)
   dump_history_enroll(hst_dEk,"<dE_K>");
   dump_history_enroll(hst_dEb,"<dE_B>");
   dump_history_enroll(hst_MeanMach,"<SonicMach>");
+  dump_history_enroll(hst_MeanAlfvenicMach,"<AlfvenicMach>");
+  dump_history_enroll(hst_MeanPressure,"<Pressure>");
+  dump_history_enroll(hst_MeanPlasmaBeta,"<PlasmaBeta>");
 
   return;
 }
@@ -701,21 +762,47 @@ void problem(DomainS *pDomain)
         pGrid->U[k][j][i].M1 = 0.0;
         pGrid->U[k][j][i].M2 = 0.0;
         pGrid->U[k][j][i].M3 = 0.0;
+#ifndef ISOTHERMAL
+        pGrid->U[k][j][i].E = p0/Gamma_1;
+#endif
       }
     }
   }
 
 #ifdef MHD
+  Real localB0;
+  Real x2center = 0.5*(pDomain->RootMaxX[1] - pDomain->RootMinX[1]);
+  
   /* Initialize uniform magnetic field */
   for (k=ks-nghost; k<=ke+nghost; k++) {
     for (j=js-nghost; j<=je+nghost; j++) {
       for (i=is-nghost; i<=ie+nghost; i++) {
-        pGrid->U[k][j][i].B1c  = B0;
+        cc_pos(pGrid,i,j,k,&x1,&x2,&x3);
+
+        // uniform in one direction
+        if (BFieldConfig == 0) {
+          localB0 = B0;
+        
+        // uniform no net flux
+        } else if (BFieldConfig == 1) {
+          if (x2 < x2center)
+            localB0 = B0;
+          else
+            localB0 = -B0;
+
+        } else {
+          ath_error("Error: unknown magnetic field configuration!");
+        }
+
+        pGrid->U[k][j][i].B1c  = localB0;
         pGrid->U[k][j][i].B2c  = 0.0;
         pGrid->U[k][j][i].B3c  = 0.0;
-        pGrid->B1i[k][j][i] = B0;
+        pGrid->B1i[k][j][i] = localB0;
         pGrid->B2i[k][j][i] = 0.0;
         pGrid->B3i[k][j][i] = 0.0;
+#ifndef ISOTHERMAL
+        pGrid->U[k][j][i].E += 0.5 * localB0 * localB0;
+#endif
       }
     }
   }
@@ -868,11 +955,102 @@ static Real hst_dEk(const GridS *pG, const int i, const int j, const int k)
 	      pG->U[k][j][i].M3*pG->U[k][j][i].M3)/pG->U[k][j][i].d;
 }
 
+static Real hst_MeanPlasmaBeta(const GridS *pG, const int i, const int j, const int k)
+{ /* plasma beta p_th/p_B */
+#ifdef MHD
+
+  Real B2 = ( 
+    pG->U[k][j][i].B1c*pG->U[k][j][i].B1c + 
+    pG->U[k][j][i].B2c*pG->U[k][j][i].B2c + 
+    pG->U[k][j][i].B3c*pG->U[k][j][i].B3c); 
+
+#ifdef ISOTHERMAL
+  Real Pres =  Iso_csound2 * pG->U[k][j][i].d;
+#else
+
+  Real M2 = (
+    pG->U[k][j][i].M1*pG->U[k][j][i].M1 +
+    pG->U[k][j][i].M2*pG->U[k][j][i].M2 +
+    pG->U[k][j][i].M3*pG->U[k][j][i].M3);
+
+  Real eInt = pG->U[k][j][i].E - 0.5 * M2 / pG->U[k][j][i].d - 0.5 * B2;
+  eInt = MAX(eInt,TINY_NUMBER);
+  Real Pres =  Gamma_1 * eInt;
+
+#endif /* ISOTHERMAL */
+
+  return Pres/(0.5 * B2);
+
+#else
+  return 0.0;
+#endif /* MHD */
+}
+
+static Real hst_MeanPressure(const GridS *pG, const int i, const int j, const int k)
+{ /* pressure*/
+#ifdef ISOTHERMAL
+  return Iso_csound2 * pG->U[k][j][i].d;
+#else
+
+  Real M2 = (
+    pG->U[k][j][i].M1*pG->U[k][j][i].M1 +
+    pG->U[k][j][i].M2*pG->U[k][j][i].M2 +
+    pG->U[k][j][i].M3*pG->U[k][j][i].M3);
+
+  Real eInt = pG->U[k][j][i].E - 0.5 * M2 / pG->U[k][j][i].d;
+#ifdef MHD
+  eInt -= 0.5 * (
+    pG->U[k][j][i].B1c*pG->U[k][j][i].B1c + 
+    pG->U[k][j][i].B2c*pG->U[k][j][i].B2c + 
+    pG->U[k][j][i].B3c*pG->U[k][j][i].B3c); 
+#endif
+
+  eInt = MAX(eInt,TINY_NUMBER);
+  return Gamma_1 * eInt;
+
+#endif /* ISOTHERMAL */
+}
+
 static Real hst_MeanMach(const GridS *pG, const int i, const int j, const int k)
-{ /* The kinetic energy in perturbations is 0.5*d*V^2 */
-  return sqrt(pG->U[k][j][i].M1*pG->U[k][j][i].M1 +
+{ /* Sonic Mach number*/
+#ifdef ISOTHERMAL
+  return sqrt((pG->U[k][j][i].M1*pG->U[k][j][i].M1 +
 	      pG->U[k][j][i].M2*pG->U[k][j][i].M2 +
-	      pG->U[k][j][i].M3*pG->U[k][j][i].M3)/pG->U[k][j][i].d;
+	      pG->U[k][j][i].M3*pG->U[k][j][i].M3)/Iso_csound2)/pG->U[k][j][i].d;
+#else
+
+  Real M2 = (
+    pG->U[k][j][i].M1*pG->U[k][j][i].M1 +
+    pG->U[k][j][i].M2*pG->U[k][j][i].M2 +
+    pG->U[k][j][i].M3*pG->U[k][j][i].M3);
+
+  Real eInt = pG->U[k][j][i].E - 0.5 * M2 / pG->U[k][j][i].d;
+#ifdef MHD
+  eInt -= 0.5 * (
+    pG->U[k][j][i].B1c*pG->U[k][j][i].B1c + 
+    pG->U[k][j][i].B2c*pG->U[k][j][i].B2c + 
+    pG->U[k][j][i].B3c*pG->U[k][j][i].B3c); 
+#endif
+
+  eInt = MAX(eInt,TINY_NUMBER);
+  Real cs = sqrt(Gamma * Gamma_1 * eInt / pG->U[k][j][i].d);
+
+  return sqrt(M2)/pG->U[k][j][i].d/cs;
+#endif /* ISOTHERMAL */
+}
+
+static Real hst_MeanAlfvenicMach(const GridS *pG, const int i, const int j, const int k)
+{ /* Alfvenic Mach number */
+#ifdef MHD
+  return sqrt((pG->U[k][j][i].M1*pG->U[k][j][i].M1 +
+	      pG->U[k][j][i].M2*pG->U[k][j][i].M2 +
+	      pG->U[k][j][i].M3*pG->U[k][j][i].M3)/pG->U[k][j][i].d/(
+        pG->U[k][j][i].B1c*pG->U[k][j][i].B1c +
+        pG->U[k][j][i].B2c*pG->U[k][j][i].B2c +
+        pG->U[k][j][i].B3c*pG->U[k][j][i].B3c));
+#else /* MHD */
+  return 0.0;
+#endif /* MHD */
 }
 
 /*! \fn static Real hst_dEb(const Grid *pG, const int i,const int j,const int k)
